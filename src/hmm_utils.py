@@ -299,104 +299,53 @@ def file_prep(filename, nrows = 100, lowercase = False):
     return observation_list, pos_list, observation_pos_list
 
 
-def create_transitions(states, bigram_counts, state_counts, n_states, add_unknown_state = False, smoothing_rate = 0.01):
+def create_transitions(prep_tuple):
     """
     Create the transitions matrix representing the probability of a state given
     the previous state
 
+    Notes: The column pertaining to the <START> state should sum to 1 and have
+    a zero for the value in the row pertaining to the <EOS> state because <EOS>
+    would only follow <START> for a sequence of length zero, which we don't want to
+    have in the training data (or test data for that matter). 
+
     Parameters:
-    :param states: list of unique states
-    :param bigram_counts: Number of times a state co-occurs in training corpus with
-        the previous state
-    :param state_counts: Number of times a state occurs in training corpus
-    :param n_states: Number of unique states
-    :param add_unknown_state: Boolean flag for including unknown state or not (changes resulting dimensions)
-    :param smoothing_rate: Number by which to inflate zero-probability states
+    :param prep_tuple: namedtuple of training data
 
     :return: transition_matrix
     """
-    if add_unknown_state:
-        transitions_matrix = np.zeros((n_states + 1, n_states + 1))
-        for i, state_i in enumerate(states):
-            for j, state_j in enumerate(states):
-                bigram = (state_i, state_j)
-                bigram_count = bigram_counts[bigram]
-                unigram_count = state_counts[state_i]
-                a = bigram_count / (unigram_count + 0.01)
-                transitions_matrix[i, j] = a
-        # Unknown column
-        transitions_matrix[:, n_states] = smoothing_rate
-        # Unknown row
-        transitions_matrix[n_states, :] = smoothing_rate
-
-    elif not add_unknown_state:
-        transitions_matrix = np.zeros((n_states, n_states))
-        for row_state in states:
-            for column_state in states:
-                bigram = (column_state, row_state)
-                bigram_count = bigram_counts[bigram]
-                unigram_count = state_counts[column_state]
-                try:
-                    transitions_matrix[row_state, column_state] = bigram_count / (unigram_count)
-                except ZeroDivisionError as err:
-                    transitions_matrix[row_state, column_state] = 0
+    transitions_matrix = np.zeros((prep_tuple.n_states, prep_tuple.n_states))
+    for row_state in prep_tuple.states:
+        for column_state in prep_tuple.states:
+            bigram = (column_state, row_state)
+            bigram_count = prep_tuple.bigram_counts[bigram]
+            unigram_count = prep_tuple.state_counts[column_state]
+            try:
+                transitions_matrix[row_state, column_state] = bigram_count / (unigram_count)
+            except ZeroDivisionError as err:
+                transitions_matrix[row_state, column_state] = 0
 
     return transitions_matrix
 
 
-def create_emissions(observations, states, observation_state_counts, observation_counts, n_observations, n_states, add_unknown_state = False, smoothing_rate = 0.01):
+def create_emissions(prep_tuple):
     """
     Create the emissions matrix representing the probability of a observation given a state.
-    The MLE of the emission probability is P(observation_i|state_i) = C(state_i,observation_i) / C(state_i).
-    :param observations: list of unique observations
-    :param states: list of unique states
-    :param tuple_counts: tuple([observation, state]) counts
-    :param state_counts: POS state counts
-    :param n_observations: Number of unique observations
-    :param n_states: Number of unique states
-    :param add_unknown_state: Boolean flag for whether or not to add a start state and observation
-    :param smoothing_rate: What value to assign to unknown states
-    :return: emissions_matrix of shape (n_states, n_observations) or (n_states+1, n_observations+1) if unknown state/observation added
+
+    The MLE of the emission probability is P(observation_i|state_i) = C(observation_i, state_i) / C(state_i).
+
+    :param prep_tuple: namedtuple with information about training data
+
+    :return: emissions_matrix of shape (n_states, n_observations)
     """
-    # TODO: fix smoothing so that no observations have greater than 1 probability
-
-    # TODO: eliminate emissions with fewer than 2 occurrences in training data, replace with unknown observation/state
-    # if add_unknown_state:
-    #     emissions_matrix = np.zeros((n_states+1, n_observations+1))
-    #     for i, state in enumerate(states):
-    #         for j, observation in enumerate(observations):
-    #             tuple_count = tuple_counts[tuple((observation, state))]
-    #             state_count = state_counts[states[i]]
-    #             b = tuple_count / state_count
-    #             emissions_matrix[i, j] = b
-    #     # Unknown state
-    #     emissions_matrix[n_states, :] = smoothing_rate
-    #     # Unknown observation
-    #     emissions_matrix[:, n_observations] = smoothing_rate
-
-    # elif not add_unknown_state:
-    #     emissions_matrix = np.zeros((n_states, n_observations))
-    #     for i, state in enumerate(states):
-    #         for j, observation in enumerate(observations):
-    #             tuple_count = tuple_counts[tuple((observation, state))]
-    #             state_count = state_counts[states[i]]
-    #             b = tuple_count / state_count
-    #             emissions_matrix[i, j] = b
-    # emissions_matrix = np.zeros((n_states, n_observations))
-    # for i, state in enumerate(states):
-    #     for j, observation in enumerate(observations):
-    #         tuple_count = tuple_counts[(observation, state)]
-    #         state_count = state_counts[states[i]]
-    #         b = tuple_count / state_count
-    #         emissions_matrix[i, j] = b
-    emissions_matrix = np.zeros((n_states, n_observations))
-    for row_state in states:
-        for column_observation in observations:
-            os_bigram = (column_observation, row_state)
-            os_bigram_count = observation_state_counts[os_bigram]
-            observation_count = observation_counts[column_observation]
+    emissions_matrix = np.zeros((prep_tuple.n_states, prep_tuple.n_observations))
+    
+    for row_state in prep_tuple.states:
+        for column_observation in prep_tuple.observations:
+            os_bigram_count = prep_tuple.observation_state_counts[(column_observation, row_state)]
+            state_count = prep_tuple.state_counts[row_state]
             try:
-                emissions_matrix[row_state, column_observation] = os_bigram_count / (observation_count)
+                emissions_matrix[row_state, column_observation] = os_bigram_count / (state_count)
             except ZeroDivisionError as err:
                 emissions_matrix[row_state, column_observation] = 0
 
@@ -406,14 +355,19 @@ def create_emissions(observations, states, observation_state_counts, observation
 def create_pi(state_map, transitions_matrix, start_state = '<START>'):
     """
     Create the initial probability distribution Pi, representing the
-     probability of the HMM starting in state i
+     probability of the HMM starting in state i.
+    
+    Note: we must ensure that this forms a valid probability distribution
+    by summing to 1 (or very nearly 1 if there are rounding/precision issues).
+
     :param state_map: The mapping between states and integers
     :param transitions_matrix: The matrix of probabilities of states given a previous state
-    :param start_state: Which state in the vocabulary corresponds to starting a sequence
+    :param start_state: Which state in the vocabulary corresponds to starting a sequence. Defaults
+    to '<START>' but could also be '<SOS>' or simply 'START'.
+
     :return: Pi, the initial probability distribution
     """
-    start_index = state_map[start_state]
-    Pi = transitions_matrix[:, start_index]
+    Pi = transitions_matrix[:, state_map[start_state]]
     assert np.isclose(Pi.sum(), 1) == True, "Does not form a valid probability distribution."
     return Pi
 

@@ -14,6 +14,7 @@ import pickle
 import cProfile
 from collections import Counter, defaultdict
 from decimal import *
+from importlib import reload
 
 # 3rd party imports
 import numpy as np
@@ -26,6 +27,7 @@ data_dir = os.path.join(home_dir, 'data')
 sys.path.append(os.path.join(home_dir, 'src'))
 from hmm_utils import *
 
+reload(hmm_utils)
 
 # Data i/o
 train_prepped = pd.read_csv(os.path.join(data_dir, 'train_prepped.csv'))
@@ -135,16 +137,10 @@ for row_state in list(set(state_list))[:11]:
 # Define matrices
 
 
-
-
-
-transitions_matrix = create_transitions(states = prep_tuple.unique_integer_states,
-                                        bigram_counts = prep_tuple.bigram_counts,
-                                        state_counts = prep_tuple.state_counts,
-                                        n_states = prep_tuple.n_states)
-# Rowsums
+transitions_matrix = create_transitions(prep_tuple)
+# Row sums
 np.sum(transitions_matrix, axis = 0) # All ones except 7th entry
-sum(np.sum(transitions_matrix, axis = 0)) # 43.0
+sum(np.sum(transitions_matrix, axis=0))  # 43.0
 # Column sums
 np.sum(transitions_matrix, axis = 1)
 sum(np.sum(transitions_matrix, axis = 1)) # 43.0
@@ -152,22 +148,37 @@ sum(np.sum(transitions_matrix, axis = 1)) # 43.0
 min(np.sum(transitions_matrix, axis = 0)) # 0.0
 max(np.sum(transitions_matrix, axis = 0)) # 1.0000000000000002
 
+# The column pertaining to the <START> tag should sum to 1 and have a zero in 
+# the <EOS> row:
+transitions_matrix[:, prep_tuple.state_map['<START>']]
+transitions_matrix[:, prep_tuple.state_map['<START>']].sum() # 0.9998881056282869
+transitions_matrix[prep_tuple.state_map['<EOS>'], prep_tuple.state_map['<START>']] # 0.0
+# Success!
+
+
+prep_tuple.observation_map['<OOV>']  # 381
+prep_tuple.state_map['<START>']  # 8
+
+Pi = create_pi(prep_tuple.state_map, transitions_matrix)
+Pi
+sum(Pi)  # 1.0
+
+start_index = prep_tuple.state_map['<START>']
+Pi = transitions_matrix[:, start_index]
+Pi
+sum(Pi)  # 0.9998881056282871
 
 
 
 
 
-emissions_matrix = create_emissions(observations = prep_tuple.unique_integer_observations,
-                                    states = prep_tuple.unique_integer_states,
-                                    observation_state_counts = prep_tuple.observation_state_counts,
-                                    observation_counts = prep_tuple.observation_counts,
-                                    n_observations = prep_tuple.n_observations,
-                                    n_states = prep_tuple.n_states)
+
+emissions_matrix = create_emissions(prep_tuple)
 # Rowsums
 np.sum(emissions_matrix, axis = 0) # Seems like all 1's
 sum(np.sum(emissions_matrix, axis = 0)) # 6325.0
 
-sorted(np.sum(emissions_matrix, axis = 0))
+sorted(np.sum(emissions_matrix, axis = 0))  # Seems like all 1's
 sorted(np.sum(emissions_matrix, axis = 0), reverse=True)
 
 min(np.sum(emissions_matrix, axis = 0)) # 0.9999999999999999
@@ -179,58 +190,6 @@ sum(np.sum(emissions_matrix, axis = 1)) # 6324.999999999999
 
 min(np.sum(emissions_matrix, axis = 1)) # 0.3414902570078332
 max(np.sum(emissions_matrix, axis = 1)) # 1422.4383557081967
-
-
-
-
-
-# 3 ways of handling initial probs:
-#    1) Make it based on counts of the actual states in the first
-#        part of the sequence for the training data
-#    2) Make it UNIFORM (create_pi_uniform(n_states))
-#    3) Make the initial distribution equal to simply the count of state
-#        occurrences, regardless of <START> observation counts
-
-# Let's try method number 1:
-# We want to know the conditional probability of any hidden state
-#     given that the previous state in the sequence was '<START>'
-#     This can be written as P(this_state | '<START>') and we can
-#     get this information from the transitions matrix. We just need
-#     to look up which column in transitions corresponds to '<START>'
-#     and then that entire column will be our Pi matrix.
-#     However, we will need to account for OOV
-
-prep_tuple.observation_map['<OOV>'] # 381
-prep_tuple.state_map['<START>'] # 8
-
-
-emissions_matrix[:, 381]
-
-transitions_matrix[:, 8].sum()
-
-transitions_matrix[:, 7]
-
-
-
-Pi = create_pi(prep_tuple.state_map, transitions_matrix)
-Pi
-sum(Pi) # 1.0
-
-start_index = prep_tuple.state_map['<START>']
-Pi = transitions_matrix[:, start_index]
-Pi
-sum(Pi)
-
-
-
-
-
-
-
-
-
-
-
 
 
 
